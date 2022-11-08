@@ -1,0 +1,964 @@
+---
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Modeling Process
+
+\begin{center}
+\includegraphics{Zestimate}
+\end{center}
+
+Our task was to create as accurate a model as possible that predicts home value (or in our case tax assessment value). We started with a data set of 58 variables and nearly 3 million observations. In order to execute more meaningful models, we had to simplify the data and cut down observations. After thoroughly cleaning through the raw data, we decided to keep 10 variables for our models. With our historically accurate assumption that location is a key driver in predicting home value, we based all of our models off of the 3 counties referenced in the data set (Los Angeles, Orange, Ventura). 
+
+For the sake of computational expense and the benefits of utilizing unsupervised learning to enhance our models, we cut down each counties data to a random sample of 20,000 observations. The 3 sample sets of 9 variables (taxvaluedollarcnt, squarefeet, bedrooms, bathrooms, yearbuilt, poolcnt, hashottuborspa, Latitude, Longitude) and (excluding fips code which was used to split data) 20,000 observations each is what we used to train and test our different models:
+
+**These are the three models we used to predict tax assessment value for each county:**  
+
+
+<br/>
+<br/>
+<br/>
+<br/>
+
+**1. A decision tree that uses all variables to predict tax value dollar count**
+
+*NOTE: Models 2 and 3 use clusters (kmeans method) comprised from latitude, longitude, and taxvaluedollarcount to predict the tax assessment value. The clusters are meant to separate the more expensive areas within a county (likely urban) and the relatively lower value areas (likely rural). Based on all of the input variables, a cluster (1 or 2) is predicted using a class decision tree. This predicted cluster is than incorporated into both models 2 and 3.*  
+
+
+
+**2. A decision tree that uses all variables EXCEPT latitude and longitude - uses cluster data to account for location  **  
+
+**3. A simple linear regression model that uses all variables EXCEPT latitude and longitude - uses cluster data to account for location**
+<br/>
+
+\newpage
+## Model 1 - Decision tree that uses all variables to predict tax value dollar count
+
+```{r PRE, include=FALSE}
+
+rm(list = ls())
+par(mfrow=c(1,1))
+
+#set working directory to current folder 
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+getwd()
+set.seed(12345)
+
+# libraries --------------------------------------------------------------------------------------
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(GGally)
+library(reshape)
+library(stringr)
+library(caret)
+library(ISLR)
+library(leaps)
+library(VIM)
+library(bnstruct)
+library(class)
+library(Metrics)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(factoextra)
+library(fastDummies)
+library(rattle)
+```
+
+```{r LA, include=FALSE}
+# load dataset------------------------------------------------------------------------------------
+data_LA = read.csv('data_LA_sample.csv', stringsAsFactors = FALSE, na.strings=c("", "NA"))
+
+#remove the ID
+data_LA = data_LA[,-1]
+
+#------------------------------------------------------------------
+
+#split data randomly------------------------------------------------------------------------------------
+split <- 0.8
+training_index <- sample(1:20000, split * 20000)
+
+#================
+#LA Models
+
+data_LA$hashottuborspa = as.factor(data_LA$hashottuborspa)
+data_LA$poolcnt = as.factor(data_LA$poolcnt)
+
+training_LA <- data_LA[training_index,] 
+testing_LA <- data_LA[-training_index,]
+
+data_types <- sapply(data_LA, class)
+data_types
+```
+
+```{r OC, include=FALSE}
+# load dataset------------------------------------------------------------------------------------
+data_OC = read.csv('data_OC_sample.csv', stringsAsFactors = FALSE, na.strings=c("", "NA"))
+
+#remove the ID
+data_OC = data_OC[,-1]
+
+#------------------------------------------------------------------
+
+#split data randomly------------------------------------------------------------------------------------
+split <- 0.8
+training_index <- sample(1:20000, split * 20000)
+
+#================
+#OC Models
+
+data_OC$hashottuborspa = as.factor(data_OC$hashottuborspa)
+data_OC$poolcnt = as.factor(data_OC$poolcnt)
+
+training_OC <- data_OC[training_index,] 
+testing_OC <- data_OC[-training_index,]
+
+data_types <- sapply(data_OC, class)
+data_types
+```
+
+```{r VC, include=FALSE}
+# load dataset------------------------------------------------------------------------------------
+data_VC = read.csv('data_VC_sample.csv', stringsAsFactors = FALSE, na.strings=c("", "NA"))
+
+#remove the ID
+data_VC = data_VC[,-1]
+
+#------------------------------------------------------------------
+
+#split data randomly------------------------------------------------------------------------------------
+split <- 0.8
+training_index <- sample(1:20000, split * 20000)
+
+#================
+#VC Models
+
+data_VC$hashottuborspa = as.factor(data_VC$hashottuborspa)
+data_VC$poolcnt = as.factor(data_VC$poolcnt)
+
+training_VC <- data_VC[training_index,] 
+testing_VC <- data_VC[-training_index,]
+
+data_types <- sapply(data_VC, class)
+data_types
+```
+
+
+**Los Angeles County Model 1:**  
+
+<br/>
+
+```{r echo=FALSE}
+#Model 1: Decision tree using all data (no clusters)
+tree_model1_LA <- rpart(formula = taxvaluedollarcnt ~ ., data = training_LA, method = "anova")
+rpart.plot(x = tree_model1_LA, yesno = 2, type = 0, extra = 0)
+```
+
+**Error Measures:**
+```{r Model1_LA}
+#use model to predict training
+tree_model1_LA_pred_training <- predict(tree_model1_LA, newdata = training_LA)
+
+#calc RMSE (training)
+rmse(actual = training_LA$taxvaluedollarcnt, predicted = tree_model1_LA_pred_training)
+
+#use model to predict testing
+tree_model1_LA_pred_testing <- predict(tree_model1_LA, newdata = testing_LA)
+
+#calc RMSE (testing)
+rmse(actual = testing_LA$taxvaluedollarcnt, predicted = tree_model1_LA_pred_testing)
+```
+
+This sophisticated "all in" decision tree relies solely on square footage and location to predict tax assessment value. This makes sense from a logical standpoint as a person could expect that these two factors combined play a key role in assessing the value of a home (especially in LA). What is nice about this model compared to the other two (that use clusters) is that there's no chance a home will be assigned to the wrong cluster (because clustering is not utilized in this model) - an error that can without a doubt throw off results. Although there are 10 branches which is a lot compared to our other tree models, this is a large contributor of error because the model is extremely sensitive (many times oversensitive) to minor adjustments. A small shift in location can produce very different results.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~247,000 is high relative to our other LA models, but this can be explained by the essence of a decision tree - a model that can only produce x number of results. This particular model is too sensitive to location and square footage, causing the high RMSE and variation in predictions.
+
+\newpage
+**Orange County Model 1:**  
+
+<br/>
+
+
+```{r echo=FALSE}
+#Model 1: Decision tree using all data (no clusters)
+tree_model1_OC <- rpart(formula = taxvaluedollarcnt ~ ., data = training_OC, method = "anova")
+rpart.plot(x = tree_model1_OC, yesno = 2, type = 0, extra = 0)
+```
+
+**Error Measures:**
+```{r Model1_OC}
+#use model to predict training
+tree_model1_OC_pred_training <- predict(tree_model1_OC, newdata = training_OC)
+
+#calc RMSE (training)
+rmse(actual = training_OC$taxvaluedollarcnt, predicted = tree_model1_OC_pred_training)
+
+#use model to predict testing
+tree_model1_OC_pred_testing <- predict(tree_model1_OC, newdata = testing_OC)
+
+#calc RMSE (testing)
+rmse(actual = testing_OC$taxvaluedollarcnt, predicted = tree_model1_OC_pred_testing)
+```
+
+This sophisticated "all in" decision tree relies solely on square footage and yearbuilt to predict tax assessment value. We made the assumption that compared to LA's data, there is less variation in value in relation to location, causing latitude and longitude to play no part in this decision tree. The simplicity of this model makes it easy to understand - a larger (and newer) house will more often than not be worth more. From a logical standpoint, this makes sense; however, I think this particular model oversimplifies the many factors that go into reaching a value. Just like all the "all in" decision tree models, this one is no different in the fact that it can only explain so much of the true values because there are x number of outcomes possible.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 4,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~240,000 is high relative to our other OC models, but this can be explained by the essence of a decision tree - a model that can only produce x number of results. This particular model is too sensitive to square footage and yearbuilt, causing the high RMSE and variation in predictions.
+
+**Ventura County Model 1:**  
+
+<br/>
+
+
+```{r echo=FALSE}
+#Model 1: Decision tree using all data (no clusters)
+tree_model1_VC <- rpart(formula = taxvaluedollarcnt ~ ., data = training_VC, method = "anova")
+rpart.plot(x = tree_model1_VC, yesno = 2, type = 0, extra = 0)
+```
+
+**Error Measures:**
+```{r}
+#use model to predict training
+tree_model1_VC_pred_training <- predict(tree_model1_VC, newdata = training_VC)
+
+#calc RMSE (training)
+rmse(actual = training_VC$taxvaluedollarcnt, predicted = tree_model1_VC_pred_training)
+
+#use model to predict testing
+tree_model1_VC_pred_testing <- predict(tree_model1_VC, newdata = testing_VC)
+
+#calc RMSE (testing)
+rmse(actual = testing_VC$taxvaluedollarcnt, predicted = tree_model1_VC_pred_testing)
+```
+
+This sophisticated "all in" decision tree relies solely on square footage. We made the assumption that compared to LA's (and even OC's) data, there is less variation in value in relation to location, causing latitude and longitude to play no part in this decision tree. In fact, square footage seems to be by far the largest driver, to the point where it is the only variable utilized in the model. The simplicity of this model makes it easy to understand - a larger house will more often than not be worth more. From a logical standpoint, this makes sense; however, I think this particular model oversimplifies the many factors that go into reaching a value. Just like all the "all in" decision tree models, this one is no different in the fact that it can only explain so much of the true values because there are x number of outcomes possible.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 2,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~188,000 is high relative to our other VC models, but this can be explained by the essence of a decision tree - a model that can only produce x number of results. This particular model is too sensitive to square footage, causing the high RMSE and variation in predictions.
+
+\newpage
+## Cluster Data and Predict Cluster using Decision Tree
+
+In order to more accurately predict the value fluctuation of a home based on location, we clustered each counties data into 2 based on latitude, longitude, and tax value dollar count. We make the assumption that one of the clusters represents an urban/expensive area and the other is more rural/inexpensive. Once the county data is clustered into 2, we then use a decision tree to predict the cluster for each individual house. Because location is generally a huge contributor in home value, it is critical that our cluster predictions are accurate. All 3 cluster decision trees (one per county) produced very accurate (~85-90% training and testing) results, providing confidence that location/value cluster will not only be statistically significant but also a highly accurate contributor in the next two models.
+
+<br/>
+
+**Los Angeles County Clustering:**  
+\newline
+
+<br/>
+
+```{r LA_Cluster, echo=FALSE}
+#K Means Clustering (preparation for models 2 and 3)
+
+data_LA_cluster = select(data_LA, c(taxvaluedollarcnt, Longitude, Latitude))
+
+#shrink down data just to see visualization of clusters
+#data_LA_clusterplot = data_LA_cluster[1:3000,]
+
+#fviz_nbclust(data_LA_clusterplot, kmeans, method = 'wss')
+#fviz_nbclust(data_LA_clusterplot, kmeans, method = 'silhouette') #alternative method to find k
+
+km_LA <- kmeans(data_LA_cluster, 2, nstart= 20)
+#summary(km_LA)
+fviz_cluster(km_LA, data = data_LA_cluster)
+```
+
+
+```{r include=FALSE}
+data_LA_for_cluster_models = data_LA
+data_LA_for_cluster_models$cluster = km_LA$cluster
+data_LA_for_cluster_models$cluster = as.factor(data_LA_for_cluster_models$cluster)
+data_LA_for_cluster_models$poolcnt = as.factor(data_LA_for_cluster_models$poolcnt)
+data_LA_for_cluster_models$hashottuborspa = as.factor(data_LA_for_cluster_models$hashottuborspa)
+
+data_types <- sapply(data_LA_for_cluster_models, class)
+data_types
+```
+
+\newpage
+**Los Angeles Decision Tree to Predict Cluster:**  
+\newline
+
+```{r echo=FALSE}
+#Decision tree to predict cluster (used in models 2 and 3)
+#-------
+
+data_for_LA_cluster_tree = select(data_LA_for_cluster_models, -c(taxvaluedollarcnt))
+
+training_LA_cluster_tree <- data_for_LA_cluster_tree[training_index,] 
+
+write.csv(training_LA_cluster_tree, "data_LA_predict_cluster.csv")
+
+testing_LA_cluster_tree <- data_for_LA_cluster_tree[-training_index,]
+
+
+#decision tree to predict cluster (without tax value)
+tree_LA_cluster = rpart(cluster ~., data = training_LA_cluster_tree, method = 'class')
+fancyRpartPlot(tree_LA_cluster, caption = NULL)
+```
+
+**Error Measures:**
+```{r Error}
+#use model to predict training
+tree_cat_LA_pred_training <- predict(tree_LA_cluster, newdata = training_LA_cluster_tree, type = 'class')
+
+#create confusion matrix (training data)
+tree_cat_LA_train_conMat_training <- confusionMatrix(data = tree_cat_LA_pred_training, reference = training_LA_cluster_tree$cluster)
+#tree_cat_LA_train_conMat_training
+tree_cat_LA_train_conMat_training$overall[1]
+
+#use model to predict testing
+tree_cat_LA_pred_testing <- predict(tree_LA_cluster, newdata = testing_LA_cluster_tree, type = 'class')
+
+#create confusion matrix (testing data)
+tree_cat_LA_train_conMat_testing <- confusionMatrix(data = tree_cat_LA_pred_testing, reference = testing_LA_cluster_tree$cluster)
+#tree_cat_LA_train_conMat_testing
+tree_cat_LA_train_conMat_testing$overall[1]
+```
+
+
+\newpage
+**Orange County Clustering:**  
+\newline
+
+<br/>
+
+```{r OC_Cluster, echo=FALSE}
+#K Means Clustering (preparation for models 2 and 3)
+
+data_OC_cluster = select(data_OC, c(taxvaluedollarcnt, Longitude, Latitude))
+
+#shrink down data just to see visualization of clusters
+#data_OC_clusterplot = data_OC_cluster[1:3000,]
+
+#fviz_nbclust(data_OC_clusterplot, kmeans, method = 'wss')
+#fviz_nbclust(data_OC_clusterplot, kmeans, method = 'silhouette') #alternative method to find k
+
+km_OC <- kmeans(data_OC_cluster, 2, nstart= 20)
+#summary(km_OC)
+fviz_cluster(km_OC, data = data_OC_cluster)
+```
+
+```{r OC_dup, include=FALSE}
+data_OC_for_cluster_models = data_OC
+data_OC_for_cluster_models$cluster = km_OC$cluster
+data_OC_for_cluster_models$cluster = as.factor(data_OC_for_cluster_models$cluster)
+data_OC_for_cluster_models$poolcnt = as.factor(data_OC_for_cluster_models$poolcnt)
+data_OC_for_cluster_models$hashottuborspa = as.factor(data_OC_for_cluster_models$hashottuborspa)
+
+data_types <- sapply(data_OC_for_cluster_models, class)
+data_types
+```
+
+\newpage
+**Orange County Decision Tree to Predict Cluster:**  
+\newline
+
+```{r OC_tree, echo=FALSE}
+#Decision tree to predict cluster (used in models 2 and 3)
+#-------
+
+data_for_OC_cluster_tree = select(data_OC_for_cluster_models, -c(taxvaluedollarcnt))
+
+training_OC_cluster_tree <- data_for_OC_cluster_tree[training_index,] 
+
+write.csv(training_OC_cluster_tree, "data_OC_predict_cluster.csv")
+
+testing_OC_cluster_tree <- data_for_OC_cluster_tree[-training_index,]
+
+
+#decision tree to predict cluster (without tax value)
+tree_OC_cluster = rpart(cluster ~., data = training_OC_cluster_tree, method = 'class')
+fancyRpartPlot(tree_OC_cluster, caption = NULL)
+```
+
+**Error Measures:**
+```{r Error_OC}
+#use model to predict training
+tree_cat_OC_pred_training <- predict(tree_OC_cluster, newdata = training_OC_cluster_tree, type = 'class')
+
+#create confusion matrix (training data)
+tree_cat_OC_train_conMat_training <- confusionMatrix(data = tree_cat_OC_pred_training, reference = training_OC_cluster_tree$cluster)
+#tree_cat_OC_train_conMat_training
+tree_cat_OC_train_conMat_training$overall[1]
+
+#use model to predict testing
+tree_cat_OC_pred_testing <- predict(tree_OC_cluster, newdata = testing_OC_cluster_tree, type = 'class')
+
+#create confusion matrix (testing data)
+tree_cat_OC_train_conMat_testing <- confusionMatrix(data = tree_cat_OC_pred_testing, reference = testing_OC_cluster_tree$cluster)
+#tree_cat_OC_train_conMat_testing
+tree_cat_OC_train_conMat_testing$overall[1]
+```
+
+
+\newpage
+**Ventura County Clustering:**  
+\newline
+
+<br/>
+
+```{r VC_Cluster, echo=FALSE}
+#K Means Clustering (preparation for models 2 and 3)
+
+data_VC_cluster = select(data_VC, c(taxvaluedollarcnt, Longitude, Latitude))
+
+#shrink down data just to see visualization of clusters
+#data_VC_clusterplot = data_VC_cluster[1:3000,]
+
+#fviz_nbclust(data_VC_clusterplot, kmeans, method = 'wss')
+#fviz_nbclust(data_VC_clusterplot, kmeans, method = 'silhouette') #alternative method to find k
+
+km_VC <- kmeans(data_VC_cluster, 2, nstart= 20)
+#summary(km_VC)
+fviz_cluster(km_VC, data = data_VC_cluster)
+```
+
+```{r VC_dup, include=FALSE}
+data_VC_for_cluster_models = data_VC
+data_VC_for_cluster_models$cluster = km_VC$cluster
+data_VC_for_cluster_models$cluster = as.factor(data_VC_for_cluster_models$cluster)
+data_VC_for_cluster_models$poolcnt = as.factor(data_VC_for_cluster_models$poolcnt)
+data_VC_for_cluster_models$hashottuborspa = as.factor(data_VC_for_cluster_models$hashottuborspa)
+
+data_types <- sapply(data_VC_for_cluster_models, class)
+data_types
+```
+
+\newpage
+**Ventura County Decision Tree to Predict Cluster:**  
+\newline
+
+```{r VC_tree, echo=FALSE}
+#Decision tree to predict cluster (used in models 2 and 3)
+#-------
+
+data_for_VC_cluster_tree = select(data_VC_for_cluster_models, -c(taxvaluedollarcnt))
+
+training_VC_cluster_tree <- data_for_VC_cluster_tree[training_index,] 
+
+write.csv(training_VC_cluster_tree, "data_VC_predict_cluster.csv")
+
+testing_VC_cluster_tree <- data_for_VC_cluster_tree[-training_index,]
+
+
+#decision tree to predict cluster (without tax value)
+tree_VC_cluster = rpart(cluster ~., data = training_VC_cluster_tree, method = 'class')
+fancyRpartPlot(tree_VC_cluster, caption = NULL)
+```
+
+**Error Measures:**
+```{r Error_VC}
+#use model to predict training
+tree_cat_VC_pred_training <- predict(tree_VC_cluster, newdata = training_VC_cluster_tree, type = 'class')
+
+#create confusion matrix (training data)
+tree_cat_VC_train_conMat_training <- confusionMatrix(data = tree_cat_VC_pred_training, reference = training_VC_cluster_tree$cluster)
+#tree_cat_VC_train_conMat_training
+tree_cat_VC_train_conMat_training$overall[1]
+
+#use model to predict testing
+tree_cat_VC_pred_testing <- predict(tree_VC_cluster, newdata = testing_VC_cluster_tree, type = 'class')
+
+#create confusion matrix (testing data)
+tree_cat_VC_train_conMat_testing <- confusionMatrix(data = tree_cat_VC_pred_testing, reference = testing_VC_cluster_tree$cluster)
+#tree_cat_VC_train_conMat_testing
+tree_cat_VC_train_conMat_testing$overall[1]
+```
+
+\newpage
+## Model 2 - Decision Tree that uses all variables EXCEPT latitude and longitude (clusters)
+
+**Los Angeles County Model 2:**  
+
+<br/>
+
+```{r LA_2_tree, echo=FALSE}
+#Model 2: Decision tree using cluster data
+
+data_for_model2_LA = data_LA_for_cluster_models
+data_types = sapply(data_for_model2_LA, "class")
+#data_types
+training_LA_model2_set <- data_for_model2_LA[training_index,] 
+write.csv(training_LA_model2_set, "data_model2_LA.csv")
+testing_LA_model2_set <- data_for_model2_LA[-training_index,]
+
+tree_model2_LA <- rpart(formula = taxvaluedollarcnt ~ ., data = training_LA_model2_set, method = "anova")
+fancyRpartPlot(tree_model2_LA, caption = NULL)
+```
+
+**Error Measures:**
+```{r RMSE2_LA}
+#use model to predict training
+tree_model2_LA_pred_training <- predict(tree_model2_LA, newdata = training_LA_model2_set)
+
+#calc RMSE (training)
+rmse(actual = training_LA_model2_set$taxvaluedollarcnt, predicted = tree_model2_LA_pred_training)
+
+#use model to predict testing
+tree_model2_LA_pred_testing <- predict(tree_model2_LA, newdata = testing_LA_model2_set)
+
+#calc RMSE (testing)
+rmse(actual = testing_LA_model2_set$taxvaluedollarcnt, predicted = tree_model2_LA_pred_testing)
+```
+
+\newpage
+
+This modified decision tree relies most heavily on cluster and secondarily on bathroom count and square footage. The main issue that can be easily visualized with this model is the fact that there are only 4 branches. This can only provide so much accuracy in terms of results because there are so many factors (small and large) that can change the value of a home. Only having 4 options over generalizes the data and does not provide confidence that results will be accurate.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 2,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~180,000 is low relative to our other decision tree model for LA, but this can be explained by the over generalization used in this model - a model that is too sensitive to too few variables, causing high variation in results magnified by the low number of possible predictions.
+
+\newpage
+
+**Orange County Model 2:**  
+
+<br/>
+
+
+```{r OC_2_tree, echo=FALSE}
+#Model 2: Decision tree using cluster data
+
+data_for_model2_OC = data_OC_for_cluster_models
+data_types = sapply(data_for_model2_OC, "class")
+#data_types
+training_OC_model2_set <- data_for_model2_OC[training_index,] 
+write.csv(training_OC_model2_set, "data_model2_OC.csv")
+testing_OC_model2_set <- data_for_model2_OC[-training_index,]
+
+tree_model2_OC <- rpart(formula = taxvaluedollarcnt ~ ., data = training_OC_model2_set, method = "anova")
+fancyRpartPlot(tree_model2_OC, caption = NULL)
+```
+
+**Error Measures:**
+```{r RMSE2_OC}
+#use model to predict training
+tree_model2_OC_pred_training <- predict(tree_model2_OC, newdata = training_OC_model2_set)
+
+#calc RMSE (training)
+rmse(actual = training_OC_model2_set$taxvaluedollarcnt, predicted = tree_model2_OC_pred_training)
+
+#use model to predict testing
+tree_model2_OC_pred_testing <- predict(tree_model2_OC, newdata = testing_OC_model2_set)
+
+#calc RMSE (testing)
+rmse(actual = testing_OC_model2_set$taxvaluedollarcnt, predicted = tree_model2_OC_pred_testing)
+```
+
+\newpage
+
+This modified decision tree relies most heavily on cluster and secondarily on bathroom count. The two main causes for concern in this particular model is the lack of the square footage variable and the low number of branches on the tree. This can only provide so much accuracy in terms of results because there are so many factors (small and large) that can change the value of a home. Only having 4 options using 2 variables (without size) over generalizes the data and does not provide confidence that results will be accurate.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 4,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~183,000 is low relative to our other decision tree model for OC, but this can be explained by the over generalization used in this model - a model that is too sensitive to too few variables, causing high variation in results magnified by the low number of possible predictions.
+
+\newpage
+
+**Ventura County Model 2:**  
+
+<br/>
+
+
+```{r VC_2_tree, echo=FALSE}
+#Model 2: Decision tree using cluster data
+
+data_for_model2_VC = data_VC_for_cluster_models
+data_types = sapply(data_for_model2_VC, "class")
+#data_types
+training_VC_model2_set <- data_for_model2_VC[training_index,] 
+write.csv(training_VC_model2_set, "data_model2_VC.csv")
+testing_VC_model2_set <- data_for_model2_VC[-training_index,]
+
+tree_model2_VC <- rpart(formula = taxvaluedollarcnt ~ ., data = training_VC_model2_set, method = "anova")
+fancyRpartPlot(tree_model2_VC, caption = NULL)
+```
+
+**Error Measures:**
+```{r RMSE2_VC}
+#use model to predict training
+tree_model2_VC_pred_training <- predict(tree_model2_VC, newdata = training_VC_model2_set)
+
+#calc RMSE (training)
+rmse(actual = training_VC_model2_set$taxvaluedollarcnt, predicted = tree_model2_VC_pred_training)
+
+#use model to predict testing
+tree_model2_VC_pred_testing <- predict(tree_model2_VC, newdata = testing_VC_model2_set)
+
+#calc RMSE (testing)
+rmse(actual = testing_VC_model2_set$taxvaluedollarcnt, predicted = tree_model2_VC_pred_testing)
+```
+
+\newpage
+
+This modified decision tree relies most heavily on cluster and secondarily on square footage and yearbuilt. The main causes for concern in this particular model is the low number of branches on the tree. This can only provide so much accuracy in terms of results because minor alterations in the two factors used (sqft and yearbuilt) can slightly change the value of a home and also significantly change the value of a home. Only having 4 options using 2 variables over generalizes the data and does not provide confidence that results will be accurate.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 2,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~146,000 is low relative to our other decision tree model for VC, but this can be explained by the over generalization used in this model - a model that is too sensitive to too few variables, causing high variation in results magnified by the low number of possible predictions.
+
+\newpage
+
+
+## Model 3 - Simple Linear Regression Model that Uses all variables EXCEPT latitude and longitude (clusters)
+
+**Los Angeles County Model 3:**  
+
+<br/>
+
+
+```{r LA_3_eh, include=FALSE}
+#Model 3: Simple linear regression using cluster data
+
+data_for_model3_LA = select(data_LA_for_cluster_models, -c(Latitude, Longitude))
+data_types <- sapply(data_for_model3_LA, class)
+data_types
+
+#convert factor variables to numeric for this model
+?as.numeric
+data_for_model3_LA$hashottuborspa = as.numeric(data_for_model3_LA$hashottuborspa)
+data_for_model3_LA$poolcnt = as.numeric(data_for_model3_LA$poolcnt)
+
+#data_cleaner$hashottuborspa[is.na(data_cleaner$hashottuborspa)] = 0
+
+data_for_model3_LA$poolcnt[data_for_model3_LA$poolcnt == 1] = 0
+data_for_model3_LA$poolcnt[data_for_model3_LA$poolcnt == 2] = 1
+data_for_model3_LA$hashottuborspa[data_for_model3_LA$hashottuborspa == 1] = 0
+data_for_model3_LA$hashottuborspa[data_for_model3_LA$hashottuborspa == 2] = 1
+
+#convert cluster to dummy variable for this dataset
+data_for_model3_LA = dummy_cols(
+  data_for_model3_LA,
+  select_columns = c("cluster"),
+  remove_first_dummy = TRUE,
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE
+)
+
+data_types <- sapply(data_for_model3_LA, class)
+data_types
+
+write.csv(data_for_model3_LA, "data_model3_LA.csv")
+```
+
+**Correlation Matrix Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r corr_LA_3, echo=FALSE}
+#Correlation Matrix
+cor_matrix_LA_3 = cor(data_for_model3_LA)
+corrplot::corrplot(cor_matrix_LA_3, method = "number", tl.cex = .8, number.cex = .6)
+```
+  
+  <br/>
+<br/>
+<br/>
+<br/>
+
+
+
+
+**RegSubsets Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r reg_sub_3_LA, echo=FALSE}
+#run a regsubsets to see linear model drivers
+reg_sub_LA = regsubsets(taxvaluedollarcnt ~ ., data = data_for_model3_LA)
+#summary(reg_sub_LA)
+plot(reg_sub_LA, scale = "adjr2")
+```
+
+```{r split_LA, include=FALSE}
+#split data randomly------------------------------------------------------------------------------------
+training_LA_model3_set <- data_for_model3_LA[training_index,] 
+testing_LA_model3_set <- data_for_model3_LA[-training_index,]
+```
+
+\newpage
+**Error Measures:**
+```{r Models_LA_lin, echo=TRUE}
+#training linear model
+training_LA_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = training_LA_model3_set)
+#summary of training model
+summary(training_LA_model3)$r.squared
+
+#RMSE (training)
+RMSE_training = sqrt(mean((training_LA_model3_set$taxvaluedollarcnt - predict(training_LA_model3, training_LA_model3_set))^2))
+RMSE_training
+
+#testing linear model
+testing_LA_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = testing_LA_model3_set)
+
+#summary of testing model
+summary(testing_LA_model3)$r.squared
+
+#RMSE (testing)
+RMSE_testing = sqrt(mean((testing_LA_model3_set$taxvaluedollarcnt - predict(testing_LA_model3, testing_LA_model3_set))^2))
+RMSE_testing
+```
+
+This simple linear regression model utilizes all the variables in the clean set and replaces latitude and longitude with clusters. This is a great model to incorporate many variables with, assuming that relationships are linear. Our correlation matrix gives us confidence that many of the relationships in the data set are linear, which would lend well with a simple linear model. The regsubsets shows us that cluster (location) is the main driver - this makes sense as location is historically a key driver in home value. The progression of variables in the model makes sense from a logical standpoint; however, the fact that 0.61/0.65 of the model is explained solely by cluster is cause for concern that the model is oversensitive to cluster. If cluster were predicted wrong in the preliminary decision tree, this would cause a great gap in actual vs predicted assessment value.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 2,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~177,000 is the lowest out of our LA models. This combined with the 0.65 r squared value means that this could be a good predictor, but it is critical that we remain mindful to the over sensitivity of cluster and the fact that cluster could (9 times out of 10 won't) be predicted wrong.
+
+
+\newpage
+**Orange County Model 3:**  
+
+<br/>
+
+
+```{r OC_3_eh, include=FALSE}
+#Model 3: Simple linear regression using cluster data
+
+data_for_model3_OC = select(data_OC_for_cluster_models, -c(Latitude, Longitude))
+data_types <- sapply(data_for_model3_OC, class)
+data_types
+
+#convert factor variables to numeric for this model
+?as.numeric
+data_for_model3_OC$hashottuborspa = as.numeric(data_for_model3_OC$hashottuborspa)
+data_for_model3_OC$poolcnt = as.numeric(data_for_model3_OC$poolcnt)
+
+#data_cleaner$hashottuborspa[is.na(data_cleaner$hashottuborspa)] = 0
+
+data_for_model3_OC$poolcnt[data_for_model3_OC$poolcnt == 1] = 0
+data_for_model3_OC$poolcnt[data_for_model3_OC$poolcnt == 2] = 1
+data_for_model3_OC$hashottuborspa[data_for_model3_OC$hashottuborspa == 1] = 0
+data_for_model3_OC$hashottuborspa[data_for_model3_OC$hashottuborspa == 2] = 1
+
+#convert cluster to dummy variable for this dataset
+data_for_model3_OC = dummy_cols(
+  data_for_model3_OC,
+  select_columns = c("cluster"),
+  remove_first_dummy = TRUE,
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE
+)
+
+data_types <- sapply(data_for_model3_OC, class)
+data_types
+
+write.csv(data_for_model3_OC, "data_model3_OC.csv")
+```
+
+**Correlation Matrix Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r corr_OC_3, echo=FALSE}
+#Correlation Matrix
+cor_matrix_OC_3 = cor(data_for_model3_OC)
+corrplot::corrplot(cor_matrix_OC_3, method = "number", tl.cex = .8, number.cex = .6)
+```
+  
+  <br/>
+<br/>
+<br/>
+<br/>
+
+
+
+
+**RegSubsets Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r reg_sub_3_OC, echo=FALSE}
+#run a regsubsets to see linear model drivers
+reg_sub_OC = regsubsets(taxvaluedollarcnt ~ ., data = data_for_model3_OC)
+#summary(reg_sub_OC)
+plot(reg_sub_OC, scale = "adjr2")
+```
+
+```{r split_OC, include=FALSE}
+#split data randomly------------------------------------------------------------------------------------
+training_OC_model3_set <- data_for_model3_OC[training_index,] 
+testing_OC_model3_set <- data_for_model3_OC[-training_index,]
+```
+
+\newpage
+**Error Measures:**
+```{r Models_OC_lin, echo=TRUE}
+#training linear model
+training_OC_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = training_OC_model3_set)
+#summary of training model
+summary(training_OC_model3)$r.squared
+
+#RMSE (training)
+RMSE_training = sqrt(mean((training_OC_model3_set$taxvaluedollarcnt - predict(training_OC_model3, training_OC_model3_set))^2))
+RMSE_training
+
+#testing linear model
+testing_OC_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = testing_OC_model3_set)
+
+#summary of testing model
+summary(testing_OC_model3)$r.squared
+
+#RMSE (testing)
+RMSE_testing = sqrt(mean((testing_OC_model3_set$taxvaluedollarcnt - predict(testing_OC_model3, testing_OC_model3_set))^2))
+RMSE_testing
+```
+
+This simple linear regression model utilizes all the variables in the clean set and replaces latitude and longitude with clusters. This is a great model to incorporate many variables with, assuming that relationships are linear. Our correlation matrix gives us confidence that many of the relationships in the data set are linear, which would lend well with a simple linear model. The regsubsets shows us that cluster (location) is the main driver - this makes sense as location is historically a key driver in home value. The progression of variables in the model makes sense from a logical standpoint; however, the fact that 0.60/0.66 of the model is explained solely by cluster is cause for concern that the model is oversensitive to cluster. If cluster were predicted wrong in the preliminary decision tree, this would cause a great gap in actual vs predicted assessment value.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 3,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~180,000 is the lowest out of our OC models. This combined with the 0.66 r squared value means that this could be a good predictor, but it is critical that we remain mindful to the over sensitivity of cluster and the fact that cluster could (9 times out of 10 won't) be predicted wrong.
+
+
+\newpage
+**Ventura County Model 3:**  
+
+<br/>
+
+
+```{r VC_3_eh, include=FALSE}
+#Model 3: Simple linear regression using cluster data
+
+data_for_model3_VC = select(data_VC_for_cluster_models, -c(Latitude, Longitude))
+data_types <- sapply(data_for_model3_VC, class)
+data_types
+
+#convert factor variables to numeric for this model
+?as.numeric
+data_for_model3_VC$hashottuborspa = as.numeric(data_for_model3_VC$hashottuborspa)
+data_for_model3_VC$poolcnt = as.numeric(data_for_model3_VC$poolcnt)
+
+#data_cleaner$hashottuborspa[is.na(data_cleaner$hashottuborspa)] = 0
+
+data_for_model3_VC$poolcnt[data_for_model3_VC$poolcnt == 1] = 0
+data_for_model3_VC$poolcnt[data_for_model3_VC$poolcnt == 2] = 1
+data_for_model3_VC$hashottuborspa[data_for_model3_VC$hashottuborspa == 1] = 0
+data_for_model3_VC$hashottuborspa[data_for_model3_VC$hashottuborspa == 2] = 1
+
+#convert cluster to dummy variable for this dataset
+data_for_model3_VC = dummy_cols(
+  data_for_model3_VC,
+  select_columns = c("cluster"),
+  remove_first_dummy = TRUE,
+  remove_most_frequent_dummy = FALSE,
+  ignore_na = FALSE,
+  split = NULL,
+  remove_selected_columns = TRUE
+)
+
+data_types <- sapply(data_for_model3_VC, class)
+data_types
+
+write.csv(data_for_model3_VC, "data_model3_VC.csv")
+```
+
+**Correlation Matrix Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r corr_VC_3, echo=FALSE}
+#Correlation Matrix
+data_for_reg_VC = select(data_for_model3_VC, -c(hashottuborspa))
+cor_matrix_VC_3 = cor(data_for_reg_VC)
+corrplot::corrplot(cor_matrix_VC_3, method = "number", tl.cex = .8, number.cex = .6)
+```
+  
+  <br/>
+<br/>
+<br/>
+<br/>
+
+
+
+
+**RegSubsets Using Clusters:**  
+<br/>
+<br/>
+<br/>
+<br/>
+```{r reg_sub_3_VC, echo=FALSE}
+#run a regsubsets to see linear model drivers
+reg_sub_VC = regsubsets(taxvaluedollarcnt ~ ., data = data_for_reg_VC)
+#summary(reg_sub_VC)
+plot(reg_sub_VC, scale = "adjr2")
+```
+
+```{r split_VC, include=FALSE}
+#split data randomly------------------------------------------------------------------------------------
+training_VC_model3_set <- data_for_model3_VC[training_index,] 
+testing_VC_model3_set <- data_for_model3_VC[-training_index,]
+```
+
+\newpage
+**Error Measures:**
+```{r Models_VC_lin, echo=TRUE}
+#training linear model
+training_VC_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = training_VC_model3_set)
+#summary of training model
+summary(training_VC_model3)$r.squared
+
+#RMSE (training)
+RMSE_training = sqrt(mean((training_VC_model3_set$taxvaluedollarcnt - predict(training_VC_model3, training_VC_model3_set))^2))
+RMSE_training
+
+#testing linear model
+testing_VC_model3 = lm(taxvaluedollarcnt ~ cluster_2 + calculatedfinishedsquarefeet + bedroomcnt + calculatedbathnbr + poolcnt + yearbuilt, data = testing_VC_model3_set)
+
+#summary of testing model
+summary(testing_VC_model3)$r.squared
+
+#RMSE (testing)
+RMSE_testing = sqrt(mean((testing_VC_model3_set$taxvaluedollarcnt - predict(testing_VC_model3, testing_VC_model3_set))^2))
+RMSE_testing
+```
+
+This simple linear regression model utilizes all the variables in the clean set and replaces latitude and longitude with clusters. This is a great model to incorporate many variables with, assuming that relationships are linear. Our correlation matrix gives us confidence that many of the relationships in the data set are linear, which would lend well with a simple linear model. The regsubsets shows us that cluster (location) is the main driver - this makes sense as location is historically a key driver in home value. The progression of variables in the model makes sense from a logical standpoint; however, the fact that 0.59/0.68 of the model is explained solely by cluster is cause for concern that the model is oversensitive to cluster. If cluster were predicted wrong in the preliminary decision tree, this would cause a great gap in actual vs predicted assessment value.
+
+The RMSE is the standard deviation of unexplained variance. Our consistent training/testing error (difference of 4,000) means that our model is fit to both the training and sample set, providing confidence that its accuracy will remain unchanged out of sample. The figure of ~142,000 is the lowest out of our VC models. This combined with the 0.68 r squared value means that this could be a good predictor, but it is critical that we remain mindful to the over sensitivity of cluster and the fact that cluster could (9 times out of 10 won't) be predicted wrong.
+
+
+\newpage
+## Conclusion
+
+After building 3 predictive models for 3 different counties, there is a lot to digest in terms of which models are best and the reasoning behind each model. To start, something that drastically improved ALL of our models was the way we incorporated location. First splitting the data into respective counties and then further dividing those up into either latitude/longitude or cluster provided an additional level of complexity that enhanced results in terms of the overall r squared. Without location incorporated at all, r squared was 0.33 and in our 3 county linear regression models we saw consistent r squared results of ~.65-.7.
+
+Model 1, the all in decision tree, gave us great insight into the county specific drivers. The data showed that in LA, square footage and location were the biggest drivers of home value. In Orange County, the main contributors were square footage and year built. And lastly, in Ventura, square footage was by far the biggest driver according to the decision tree. What is nice about this first model is that it takes into account all the variables (without error in terms of the input variables (as opposed to the models that use clusters)). The issue with this model, being that it is a decision tree, is that it (in every county) overgeneralizes the data by only taking into account 1,2, or 3 variables and only producing x number of outcomes. When applied to the data, having this few outputs is cause for concern since home value can change with the slight shift in a number of variables.
+
+Model 2, the decision tree that utilizes clusters, was good in the sense that it lowered the RMSE (in all 3 counties); however, the model is way too sensitive to cluster to the point where a failed cluster prediction (unlikely but must be considered) would completely throw off the predicted asssessment value. With this in mind, this model arguably provides the best generalizations of the data since it uses the clusters to account for location and divides all the data into only 4 predicted values. This fact alone (only 4 predicted values) is a great cause for concern and is very unrealistic since home value can change with a slight shift in many factors. However, if the preliminary decision tree predicts cluster correctly, and cluster is as important for a house as this model makes it to be, it will succeed in predicting (or getting close) to the true assessment value.
+
+Model 3, the simple linear regression model that utilizes clusters, was good in the sense that it utilized all the variables (cluster for location). It produced the lowest RMSE (for all counties) which we believe can be attributed to the fact that ALL variables played a role as opposed to our other two models. This combined with the ~0.65 r swuared gives us confidence that (again, we assume cluster is predicted correctly) our predictions will be generally accurate. The weakest component of this model, similar to model 2, is the over reliance on cluster. The difference of a house value in one cluster vs. the other is nearly half a million for all of the counties. This means that our clusters were too general and overcompensated location as a predictor of value.
+
+Each model serves a different purpose, so it would be unfair to say one is better than the other. In terms of r squared, model 3 is the most significant, but this model also has to incorporate the error of predicting the wrong cluster and the over sensitivity of cluster as a whole. Model 1 does a great job of putting only the key drivers into play without the risk of an inaccurate clustering. This model is perhaps the most reliable, but doesn't necessarily deliver on the low RMSE because of this reliability. Model 3 is again in theory a solid model; however, like model 2 it overcompensates for cluster and there is always the off chance that cluster is predicted wrong.
+
+If we were to continue enhancing these models, we would likely go back and see how our models 2 and 3 would change by clustering each counties data into 3 instead of 2. This could lower the sensitivity of the variable; however it could also produce less accurate predictions with the decision tree.
+
+We've attached an RShiny application that simulates our 3 models in each county!
+
+\newpage
+## Appendix - Sources and Detailed Data Cleaning Chart
+
+https://shiny.rstudio.com/tutorial/written-tutorial/lesson2/  
+
+https://homeguides.sfgate.com/real-estate-market-value-vs-assessed-value-1568.html  
+
+https://lao.ca.gov/Publications  
+
+https://www.kaggle.com/c/zillow-prize-1/overview  
+
+https://www.valuepenguin.com/mortgages/what-is-the-assessed-value-of-a-house#:~:text=Assessed%20Value%20%3D%20Property%20Tax%20Bill%20x%20(100%20%2F%20Tax%20Rate)&text=With%20these%20two%20values%2C%20you,1%25%2C%20giving%20you%20%24135%2C000  
+
+https://www.datacamp.com/community/tutorials/decision-trees-R  
+
+https://www.datacamp.com/community/tutorials/k-means-clustering-r  
+
+
+
+
+
+
+
